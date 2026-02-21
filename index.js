@@ -22,6 +22,7 @@ class TwitterBot extends EventEmitter {
    * @param {string} [options.username]  – Twitter username (for building tweet URLs)
    * @param {boolean} [options.headless=true]
    * @param {number}  [options.timeout=60000]
+   * @param {string}  [options.chromePath]  – Path to Chrome executable (optional)
    */
   constructor(options = {}) {
     super();
@@ -38,6 +39,7 @@ class TwitterBot extends EventEmitter {
     this.username = options.username || "";
     this.headless = options.headless !== undefined ? options.headless : true;
     this.timeout = options.timeout || 60000;
+    this.chromePath = options.chromePath || null;
 
     this.browser = null;
     this.page = null;
@@ -53,7 +55,7 @@ class TwitterBot extends EventEmitter {
 
     try {
       // ── Launch browser ────────────────────────────────────────────────
-      this.browser = await puppeteer.launch({
+      const launchOptions = {
         headless: this.headless ? "new" : false,
         args: [
           "--no-sandbox",
@@ -61,7 +63,25 @@ class TwitterBot extends EventEmitter {
           "--disable-blink-features=AutomationControlled",
         ],
         defaultViewport: { width: 1280, height: 720 },
-      });
+      };
+
+      // Try to use system Chrome if Puppeteer's Chrome is not found
+      if (process.platform === "win32") {
+        const fs = require("fs");
+        const possiblePaths = [
+          "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+          "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+          process.env.LOCALAPPDATA + "\\Google\\Chrome\\Application\\chrome.exe",
+        ];
+        for (const path of possiblePaths) {
+          if (fs.existsSync(path)) {
+            launchOptions.executablePath = path;
+            break;
+          }
+        }
+      }
+
+      this.browser = await puppeteer.launch(launchOptions);
 
       this.page = await this.browser.newPage();
 

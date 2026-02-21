@@ -86,6 +86,32 @@ new TwitterBot(options)
 | `username` | `string` | `""` | Twitter username — used for building tweet URLs |
 | `headless` | `boolean` | `true` | Run browser in headless mode |
 | `timeout` | `number` | `60000` | Navigation timeout (ms) |
+| `chromePath` | `string` | `null` | Path to Chrome executable (see below) |
+
+### Chrome Setup
+
+By default, the library tries to find Chrome automatically on Windows:
+- `C:\Program Files\Google\Chrome\Application\chrome.exe`
+- `C:\Program Files (x86)\Google\Chrome\Application\chrome.exe`
+- `%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe`
+
+If Chrome is not found, you have two options:
+
+**Option 1: Install Puppeteer's Chrome**
+```bash
+npx puppeteer browsers install chrome
+```
+
+**Option 2: Provide custom Chrome path**
+```js
+const bot = new TwitterBot({
+  cookies: { ... },
+  chromePath: "C:\\path\\to\\chrome.exe"  // Windows
+  // chromePath: "/usr/bin/google-chrome"  // Linux
+});
+```
+
+---
 
 ### Required Cookies
 
