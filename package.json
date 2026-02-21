@@ -23,7 +23,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/alpersamur3/x-twitter-bot.git"
+    "url": "git+https://github.com/alpersamur3/x-twitter-bot.git"
   },
   "homepage": "https://github.com/alpersamur3/x-twitter-bot#readme",
   "dependencies": {
