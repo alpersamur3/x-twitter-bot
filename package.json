@@ -1,0 +1,35 @@
+{
+  "name": "x-twitter-bot",
+  "version": "1.0.0",
+  "description": "Twitter/X automation library powered by Puppeteer. Cookie-based auth, tweet, like, scrape stats & comments.",
+  "main": "index.js",
+  "files": [
+    "index.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "example": "node example.js"
+  },
+  "keywords": [
+    "twitter",
+    "x",
+    "bot",
+    "automation",
+    "puppeteer",
+    "scraper"
+  ],
+  "author": "alpersamur3",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alpersamur3/x-twitter-bot.git"
+  },
+  "homepage": "https://github.com/alpersamur3/x-twitter-bot#readme",
+  "dependencies": {
+    "puppeteer": "^21.11.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
