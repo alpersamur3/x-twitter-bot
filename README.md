@@ -1,6 +1,14 @@
-# x-bot
+# x-twitter-bot
 
-Event-driven Twitter/X automation library for Node.js. Puppeteer + cookie-based auth.
+**Node.js Twitter/X automation library** — post tweets, scrape stats & comments, search and like, all with cookie-based auth. No official API key required.
+
+Built on [Puppeteer](https://pptr.dev/). EventEmitter-based, headless Chrome automation.
+
+[![npm version](https://img.shields.io/npm/v/x-twitter-bot.svg)](https://www.npmjs.com/package/x-twitter-bot)
+[![npm downloads](https://img.shields.io/npm/dm/x-twitter-bot.svg)](https://www.npmjs.com/package/x-twitter-bot)
+[![license](https://img.shields.io/npm/l/x-twitter-bot.svg)](LICENSE)
+
+> **Keywords:** twitter bot nodejs, x.com automation, puppeteer twitter scraper, tweet scraper node, twitter automation library, x-twitter-bot npm, post tweet nodejs, scrape twitter comments nodejs
 
 ## Install
 
