@@ -148,15 +148,21 @@ bot.init(); // triggers 'ready' or 'loginRequired'
 
 ### `bot.postTweet(text)`
 
-Posts a tweet (max 280 chars). After clicking post, checks for X error toasts (e.g. duplicate tweet warning) before returning. Handles "Leave site?" dialogs automatically. Emits `tweetPosted` on success, `tweetFailed` on failure.
+Posts a tweet (max 280 chars). After clicking post, verifies the tweet appears in your feed and extracts the tweet ID. Handles "Leave site?" dialogs automatically. Emits `tweetPosted` on success, `tweetFailed` on failure.
 
 ```js
 const result = await bot.postTweet("Hello! 🚀");
-// { success: true, text: "Hello! 🚀", timestamp: "2026-02-21T12:00:00.000Z" }
+// {
+//   success: true,
+//   text: "Hello! 🚀",
+//   postId: "1893024567890123456",
+//   timestamp: "2026-02-22T12:00:00.000Z"
+// }
 ```
 
 Errors are thrown and also emitted via `tweetFailed`:
-- `"Whoops! You already said that."` — duplicate tweet
+- `"Whoops! You already said that."` — duplicate tweet detected by X
+- `"Tweet not found in feed after posting"` — verification failed
 - `"Tweet textarea not found"` — compose page failed to load
 - `"Post button not found"` — UI issue
 

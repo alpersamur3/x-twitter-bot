@@ -6,7 +6,7 @@ const bot = new TwitterBot({
     ct0: "YOUR_CT0_TOKEN",
     twid: "u%3DYOUR_USER_ID",
     kdt: "YOUR_KDT_TOKEN",
-    att: "YOUR_ATT_TOKEN"
+    att: "YOUR_ATT_TOKEN",
   },
   username: "your_username",
   headless: false,

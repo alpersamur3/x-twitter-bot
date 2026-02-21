@@ -166,59 +166,55 @@ class TwitterBot extends EventEmitter {
 
       if (!clicked) throw new Error("Post button not found");
 
-      // Wait for X to process — watch for compose to close OR error toast to appear
-      let postError = null;
-      const deadline = Date.now() + 8000;
-      while (Date.now() < deadline) {
-        await delay(500);
-        const status = await this.page.evaluate(() => {
-          const onCompose = window.location.href.includes("/compose");
+      // Wait for compose to close (URL changes via SPA, no real navigation)
+      await delay(4000);
+
+      const stillOnCompose = await this.page.evaluate(() =>
+        window.location.href.includes("/compose")
+      );
+
+      if (stillOnCompose) {
+        // Still on compose = tweet failed. Read toast for error reason.
+        const toastText = await this.page.evaluate(() => {
           const toast = document.querySelector('[role="status"]');
-          const toastText = toast ? toast.innerText.trim() : "";
-          return { onCompose, toastText };
+          return toast ? toast.innerText.trim() : "";
         });
-
-        // Error toast while still on compose = real failure
-        if (status.onCompose && status.toastText) {
-          postError = status.toastText;
-          break;
-        }
-
-        // Navigated away from compose = submitted successfully
-        if (!status.onCompose) break;
-      }
-
-      if (postError) {
         await this._dismissCompose();
-        throw new Error(postError);
+        throw new Error(toastText || "Tweet could not be posted");
       }
 
-      // Navigate to home and verify tweet appears in feed
-      await this._recoverPage();
-      await delay(1500);
+      // URL changed → we're on home/feed now. Find our tweet at the top.
+      await delay(2000);
 
-      const verified = await this.page.evaluate((tweetText) => {
+      const verification = await this.page.evaluate((tweetText) => {
         const cells = document.querySelectorAll('[data-testid="cellInnerDiv"]');
         for (const cell of cells) {
           const article = cell.querySelector('article[data-testid="tweet"]');
           if (!article) continue;
           const textEl = article.querySelector('[data-testid="tweetText"]');
-          if (textEl && textEl.innerText.includes(tweetText.slice(0, 30))) {
-            return true;
+          if (!textEl) continue;
+          if (textEl.innerText.includes(tweetText.slice(0, 30))) {
+            const timeLink = article.querySelector('a[href*="/status/"] time');
+            const statusLink = timeLink ? timeLink.closest("a") : null;
+            const href = statusLink ? statusLink.getAttribute("href") : "";
+            const match = href.match(/\/status\/(\d+)/);
+            const postId = match ? match[1] : null;
+            return { found: true, postId };
           }
         }
-        return false;
+        return { found: false, postId: null };
       }, text);
 
-      if (!verified) {
-        // Feed may not have refreshed yet — still treat as success if not on compose
-        const stillOnCompose = await this.page.evaluate(() =>
-          window.location.href.includes("/compose")
-        );
-        if (stillOnCompose) throw new Error("Tweet may not have been posted");
+      if (!verification.found) {
+        throw new Error("Tweet not found in feed after posting");
       }
 
-      const result = { success: true, text, timestamp: new Date().toISOString() };
+      const result = {
+        success: true,
+        text,
+        postId: verification.postId,
+        timestamp: new Date().toISOString(),
+      };
       this.emit("tweetPosted", result);
       return result;
     } catch (err) {
