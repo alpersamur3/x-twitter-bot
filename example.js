@@ -79,6 +79,21 @@ bot.on("ready", async () => {
   const liked = await bot.searchAndLike("nodejs", 3);
   console.log(`\n❤️  Liked ${liked.liked} tweets for "${liked.query}"`);
 
+  // 9. Setup profile (values provided → set, empty → skip step)
+  try {
+    const profile = await bot.setupProfile({
+      // avatar: "./avatar.jpg",          // profil fotoğrafı (dosya yolu)
+      // header: "./banner.jpg",          // kapak fotoğrafı  (dosya yolu)
+      // displayName: "My Bot",           // görünen ad      (max 50)
+      bio: "Hello world! 🤖",             // biyografi       (max 160)
+      // location: "Istanbul",            // konum           (max 30)
+      // website: "https://example.com",  // web sitesi      (max 100)
+    });
+    console.log("\n🖼️  Profile updated:", profile);
+  } catch (err) {
+    console.error("❌ Profile edit failed:", err.message);
+  }
+
   await bot.close();
 });
 

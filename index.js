@@ -48,6 +48,8 @@ function _checkForUpdates() {
  *   followFailed    – Follow failed                → { username, error }
  *   userUnfollowed  – User unfollowed successfully  → { username, status, timestamp }
  *   unfollowFailed  – Unfollow failed               → { username, error }
+ *   profileSetup    – Profile setup completed       → { avatar, header, bio, … }
+ *   profileSetupFailed – Profile setup failed        → { error }
  *   closed          – Browser closed
  */
 class TwitterBot extends EventEmitter {
@@ -273,11 +275,20 @@ class TwitterBot extends EventEmitter {
       if (!clicked) throw new Error("Post button not found");
 
       // Wait for compose to close (URL changes via SPA, no real navigation)
-      await delay(4000);
-
-      const stillOnCompose = await this.page.evaluate(() =>
-        window.location.href.includes("/compose")
-      );
+      // Media uploads take longer — poll until /compose disappears or timeout
+      const hasMedia = media.length > 0;
+      const postTimeout = hasMedia ? 30000 : 8000;
+      const pollInterval = 500;
+      let elapsed = 0;
+      let stillOnCompose = true;
+      while (elapsed < postTimeout) {
+        await delay(pollInterval);
+        elapsed += pollInterval;
+        stillOnCompose = await this.page.evaluate(() =>
+          window.location.href.includes("/compose")
+        );
+        if (!stillOnCompose) break;
+      }
 
       if (stillOnCompose) {
         // Still on compose = tweet failed. Read toast for error reason.
@@ -290,7 +301,7 @@ class TwitterBot extends EventEmitter {
       }
 
       // URL changed → we're on home/feed now. Find our tweet at the top.
-      await delay(3000);
+      await delay(hasMedia ? 5000 : 3000);
 
       const verification = await this.page.evaluate((tweetText) => {
         // Helper to remove emojis and normalize text
@@ -307,6 +318,9 @@ class TwitterBot extends EventEmitter {
             .replace(/[\u{1FA70}-\u{1FAFF}]/gu, '') // Symbols and Pictographs Extended-A
             .replace(/[\u{2600}-\u{26FF}]/gu, '')   // Misc symbols
             .replace(/[\u{2700}-\u{27BF}]/gu, '')   // Dingbats
+            .replace(/[\uFE00-\uFE0F]/g, '')         // Variation selectors (e.g. U+FE0F after 🖼)
+            .replace(/\u200D/g, '')                  // Zero-width joiner (emoji sequences)
+            .replace(/\u20E3/g, '')                  // Combining enclosing keycap
             .trim()
             .replace(/\s+/g, ' ');
         };
@@ -1019,6 +1033,133 @@ class TwitterBot extends EventEmitter {
     return { query, liked };
   }
 
+  // ── Edit Profile (──────────────────────────────────────────────────
+
+  /**
+   * Edit the authenticated user’s profile via https://x.com/settings/profile.
+   *
+   * All fields on the page:
+   *   • header      – 1st  fileInput   (banner image)
+   *   • avatar      – 2nd  fileInput   (profile picture)
+   *   • displayName – input[name="displayName"]  (max 50)
+   *   • bio         – textarea[name="description"] (max 160)
+   *   • location    – input[name="location"]     (max 30)
+   *   • website     – input[name="url"]           (max 100)
+   *   • Save        – data-testid="Profile_Save_Button"
+   *
+   * Only the provided fields are changed; omitted ones are left untouched.
+   *
+   * @param {object}  options
+   * @param {string}  [options.avatar]      – Path to profile-picture image
+   * @param {string}  [options.header]      – Path to header / banner image
+   * @param {string}  [options.displayName] – Display name (max 50)
+   * @param {string}  [options.bio]         – Bio / description text (max 160)
+   * @param {string}  [options.location]    – Location text (max 30)
+   * @param {string}  [options.website]     – Website URL (max 100)
+   * @returns {Promise<object>}
+   */
+  async setupProfile(options = {}) {
+    this._ensureReady();
+
+    const { avatar, header, bio, displayName, location, website } = options;
+    const pathModule = require("path");
+    const fs = require("fs");
+
+    // Validate image paths up-front
+    for (const [label, filePath] of [["avatar", avatar], ["header", header]]) {
+      if (filePath) {
+        const abs = pathModule.isAbsolute(filePath) ? filePath : pathModule.resolve(filePath);
+        if (!fs.existsSync(abs)) throw new Error(`${label} file not found: ${abs}`);
+      }
+    }
+
+    try {
+      await this.page.goto("https://x.com/settings/profile", {
+        waitUntil: "networkidle2",
+        timeout: this.timeout,
+      });
+      await delay(2000);
+
+      // Wait for the save button to confirm page loaded
+      const pageReady = await this._waitFor('[data-testid="Profile_Save_Button"]', 10000);
+      if (!pageReady) throw new Error("Profile settings page did not load");
+
+      const result = {
+        avatar: false,
+        header: false,
+        displayName: false,
+        bio: false,
+        location: false,
+        website: false,
+        saved: false,
+        timestamp: new Date().toISOString(),
+      };
+
+      // ── Header (banner) image ── 1st fileInput on the page ────
+      if (header) {
+        const fileInputs = await this.page.$$('[data-testid="fileInput"]');
+        if (fileInputs.length >= 1) {
+          const abs = pathModule.isAbsolute(header) ? header : pathModule.resolve(header);
+          await fileInputs[0].uploadFile(abs);
+          await delay(3000);
+          // Crop dialog
+          await this._clickTestId("applyButton");
+          await delay(1500);
+          result.header = true;
+        }
+      }
+
+      // ── Avatar (profile picture) ── 2nd fileInput on the page ──
+      if (avatar) {
+        const fileInputs = await this.page.$$('[data-testid="fileInput"]');
+        if (fileInputs.length >= 2) {
+          const abs = pathModule.isAbsolute(avatar) ? avatar : pathModule.resolve(avatar);
+          await fileInputs[1].uploadFile(abs);
+          await delay(3000);
+          // Crop dialog
+          await this._clickTestId("applyButton");
+          await delay(1500);
+          result.avatar = true;
+        }
+      }
+
+      // ── Display Name ────────────────────────────────────────
+      if (displayName !== undefined) {
+        const ok = await this._fillProfileField('input[name="displayName"]', displayName);
+        if (ok) result.displayName = true;
+      }
+
+      // ── Bio ─────────────────────────────────────────────────
+      if (bio !== undefined) {
+        const ok = await this._fillProfileField('textarea[name="description"]', bio);
+        if (ok) result.bio = true;
+      }
+
+      // ── Location ────────────────────────────────────────────
+      if (location !== undefined) {
+        const ok = await this._fillProfileField('input[name="location"]', location);
+        if (ok) result.location = true;
+      }
+
+      // ── Website ─────────────────────────────────────────────
+      if (website !== undefined) {
+        const ok = await this._fillProfileField('input[name="url"]', website);
+        if (ok) result.website = true;
+      }
+
+      // ── Save ────────────────────────────────────────────────
+      await this._clickTestId("Profile_Save_Button");
+      await delay(3000);
+      result.saved = true;
+
+      this.emit("profileSetup", result);
+      return result;
+    } catch (err) {
+      this.emit("profileSetupFailed", { error: err.message });
+      throw err;
+    }
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   //  LIFECYCLE
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1063,7 +1204,7 @@ class TwitterBot extends EventEmitter {
     // Try to close the compose modal/page without triggering beforeunload issues.
     // Accept any "Leave site?" dialog that appears.
     this.page.once("dialog", async (dialog) => {
-      await dialog.accept();
+      try { await dialog.accept(); } catch { /* already handled by another handler */ }
     });
 
     try {
@@ -1094,7 +1235,7 @@ class TwitterBot extends EventEmitter {
   async _recoverPage() {
     // Accept any "Leave site?" beforeunload dialogs
     this.page.once("dialog", async (dialog) => {
-      await dialog.accept();
+      try { await dialog.accept(); } catch { /* already handled by another handler */ }
     });
 
     try {
@@ -1112,7 +1253,7 @@ class TwitterBot extends EventEmitter {
         try {
           p.url();
           this.page = p;
-          this.page.once("dialog", async (d) => await d.accept());
+          this.page.once("dialog", async (d) => { try { await d.accept(); } catch { /* already handled */ } });
           await this.page.goto("https://x.com/home", {
             waitUntil: "domcontentloaded",
             timeout: this.timeout,
@@ -1139,6 +1280,83 @@ class TwitterBot extends EventEmitter {
       }
     }
     await delay(1000);
+  }
+
+  /**
+   * Click an element by its data-testid attribute.
+   * @param {string} testId
+   * @returns {Promise<boolean>}
+   */
+  async _clickTestId(testId) {
+    const clicked = await this.page.evaluate((id) => {
+      const el = document.querySelector(`[data-testid="${id}"]`);
+      if (el) { el.click(); return true; }
+      return false;
+    }, testId);
+    if (clicked) await delay(500);
+    return clicked;
+  }
+
+  /**
+   * Click the first visible button/link whose text matches any of the variants.
+   * @param {string[]} textVariants
+   * @returns {Promise<boolean>}
+   */
+  async _clickFlowButton(textVariants) {
+    const clicked = await this.page.evaluate((variants) => {
+      const elements = document.querySelectorAll('button, a, [role="button"]');
+      for (const el of elements) {
+        const text = (el.innerText || el.textContent || "").toLowerCase().trim();
+        for (const v of variants) {
+          if (text === v || text.includes(v)) {
+            el.click();
+            return true;
+          }
+        }
+      }
+      return false;
+    }, textVariants);
+    if (clicked) await delay(500);
+    return clicked;
+  }
+
+  /**
+   * Upload an image via a data-testid="fileInput" element.
+   * Handles optional crop/apply dialog.
+   * @param {ElementHandle} fileInput – Puppeteer element handle
+   * @param {string} filePath
+   */
+  async _uploadFileInput(fileInput, filePath) {
+    const pathModule = require("path");
+    const abs = pathModule.isAbsolute(filePath) ? filePath : pathModule.resolve(filePath);
+    await fileInput.uploadFile(abs);
+    await delay(3000);
+    // Crop / apply dialog (if shown)
+    await this._clickTestId("applyButton");
+    await delay(1500);
+  }
+
+  /**
+   * Clear and fill a profile-settings form field (input / textarea).
+   * Uses Ctrl+A → Backspace to clear, then types new value.
+   * @param {string} selector – CSS selector
+   * @param {string} text
+   * @returns {Promise<boolean>}
+   */
+  async _fillProfileField(selector, text) {
+    const el = await this.page.$(selector);
+    if (!el) return false;
+    await el.click();
+    await delay(100);
+    // Select all + delete existing content
+    await this.page.keyboard.down("Control");
+    await this.page.keyboard.press("a");
+    await this.page.keyboard.up("Control");
+    await this.page.keyboard.press("Backspace");
+    await delay(100);
+    await el.type(text, { delay: 20 });
+    await delay(300);
+    return true;
   }
 
   _buildCookieObjects() {

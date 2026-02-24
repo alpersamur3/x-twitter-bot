@@ -1,7 +1,7 @@
 {
   "name": "x-twitter-bot",
-  "version": "1.3.0",
-  "description": "Twitter/X automation library powered by Puppeteer. Cookie-based auth, tweet, like, scrape stats & comments, follow/unfollow users.",
+  "version": "1.4.0",
+  "description": "Twitter/X automation library powered by Puppeteer. Cookie-based auth, tweet with media, like, scrape stats & comments, follow/unfollow users, edit profile.",
   "main": "index.js",
   "files": [
     "index.js",

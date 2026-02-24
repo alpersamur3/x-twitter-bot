@@ -69,6 +69,16 @@ bot.on("ready", async () => {
   // 8. Search & like
   await bot.searchAndLike("nodejs", 3);
 
+  // 9. Edit profile (only provided fields are changed)
+  await bot.setupProfile({
+    bio: "Hello world! 🤖",
+    location: "Istanbul",
+    website: "https://example.com",
+    // avatar: "./avatar.jpg",
+    // header: "./banner.jpg",
+    // displayName: "My Bot",
+  });
+
   await bot.close();
 });
 
@@ -153,6 +163,8 @@ Get these from DevTools → Application → Cookies → `https://x.com`.
 | `followFailed` | `{ username, error }` | Follow failed |
 | `userUnfollowed` | `{ username, status, timestamp }` | User unfollowed successfully |
 | `unfollowFailed` | `{ username, error }` | Unfollow failed |
+| `profileSetup` | `{ avatar, header, displayName, bio, location, website, saved, timestamp }` | Profile updated successfully |
+| `profileSetupFailed` | `{ error }` | Profile update failed |
 | `error` | `Error` | Unrecoverable error during init |
 | `closed` | – | Browser closed |
 
@@ -398,6 +410,49 @@ Searches for tweets matching a query and likes them. `count` defaults to `5`.
 const result = await bot.searchAndLike("nodejs", 5);
 // { query: "nodejs", liked: 5 }
 ```
+
+---
+
+### `bot.setupProfile(options?)`
+
+Edits the authenticated user's profile via `https://x.com/settings/profile`.  
+Only the fields you provide are changed — omitted fields are left untouched.
+
+| Option | Type | Max | Description |
+|---|---|---|---|
+| `displayName` | `string` | 50 | Display name |
+| `bio` | `string` | 160 | Bio / description |
+| `location` | `string` | 30 | Location text |
+| `website` | `string` | 100 | Website URL |
+| `avatar` | `string` | — | Path to profile picture image |
+| `header` | `string` | — | Path to banner / header image |
+
+```js
+const result = await bot.setupProfile({
+  bio: "Hello world! 🤖",
+  location: "Istanbul",
+  website: "https://example.com",
+  // avatar: "./avatar.jpg",
+  // header: "./banner.jpg",
+  // displayName: "My Bot",
+});
+```
+
+**Response:**
+```js
+{
+  avatar: false,        // true if avatar was updated
+  header: false,        // true if header was updated
+  displayName: false,   // true if displayName was updated
+  bio: true,
+  location: true,
+  website: true,
+  saved: true,
+  timestamp: "2026-02-24T12:00:00.000Z"
+}
+```
+
+Emits `profileSetup` on success, `profileSetupFailed` on error.
 
 ---
 
