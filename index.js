@@ -145,16 +145,24 @@ class TwitterBot extends EventEmitter {
 
   // ── Post a tweet ─────────────────────────────────────────────────────────
 
-  async postTweet(text) {
+  async postTweet(text, options = {}) {
     this._ensureReady();
     if (!text) throw new Error("Tweet text is required");
     if (text.length > 280) throw new Error("Tweet exceeds 280 characters");
 
+    const media = options.media || [];
+    if (media.length > 4) throw new Error("Maximum 4 media files allowed");
+
     try {
       // Handle "Leave site?" / beforeunload dialogs automatically
-      this.page.once("dialog", async (dialog) => {
+      // Also handles media upload error dialogs
+      let dialogHandled = false;
+      const dialogHandler = async (dialog) => {
+        if (dialogHandled) return;
+        dialogHandled = true;
         await dialog.accept();
-      });
+      };
+      this.page.on("dialog", dialogHandler);
 
       await this.page.goto("https://x.com/compose/post", {
         waitUntil: "networkidle2",
@@ -166,12 +174,52 @@ class TwitterBot extends EventEmitter {
       const found =
         (await this._waitFor(textarea, 10000)) ||
         (await this._waitFor('div[role="textbox"]', 5000));
-      if (!found) throw new Error("Tweet textarea not found");
+      if (!found) {
+        this.page.off("dialog", dialogHandler);
+        throw new Error("Tweet textarea not found");
+      }
 
       await this.page.click(textarea);
       await delay(200);
       await this.page.type(textarea, text, { delay: 30 });
       await delay(500);
+
+      // Upload media files if provided
+      if (media.length > 0) {
+        const path = require("path");
+        const fileInput = await this.page.$('input[data-testid="fileInput"]');
+        if (!fileInput) {
+          this.page.off("dialog", dialogHandler);
+          throw new Error("File input not found");
+        }
+
+        for (let filePath of media) {
+          // Convert to absolute path if relative
+          if (!path.isAbsolute(filePath)) {
+            filePath = path.resolve(filePath);
+          }
+          
+          // Check if file exists
+          const fs = require("fs");
+          if (!fs.existsSync(filePath)) {
+            this.page.off("dialog", dialogHandler);
+            throw new Error(`File not found: ${filePath}`);
+          }
+
+          await fileInput.uploadFile(filePath);
+          // Wait for upload to complete - preview appears
+          await delay(2500);
+          
+          // Check for upload errors (X shows a dialog with error message)
+          // If dialog was shown, dialogHandled will be true
+          if (dialogHandled) {
+            this.page.off("dialog", dialogHandler);
+            throw new Error("Media upload failed - file may be unsupported or too large");
+          }
+        }
+        // Extra wait for all previews to render
+        await delay(1000);
+      }
 
       const clicked = await this.page.evaluate(() => {
         const btn =
@@ -226,8 +274,12 @@ class TwitterBot extends EventEmitter {
       }, text);
 
       if (!verification.found) {
+        this.page.off("dialog", dialogHandler);
         throw new Error("Tweet not found in feed after posting");
       }
+
+      // Clean up dialog handler
+      this.page.off("dialog", dialogHandler);
 
       const result = {
         success: true,
@@ -238,6 +290,10 @@ class TwitterBot extends EventEmitter {
       this.emit("tweetPosted", result);
       return result;
     } catch (err) {
+      // Make sure to clean up dialog handler
+      if (typeof dialogHandler !== "undefined") {
+        try { this.page.off("dialog", dialogHandler); } catch { /* ignore */ }
+      }
       try { await this._recoverPage(); } catch { /* ignore */ }
       this.emit("tweetFailed", { text, error: err.message });
       throw err;

@@ -27,7 +27,17 @@ bot.on("ready", async () => {
     console.error("❌ Tweet failed:", err.message);
   }
 
-  // 2. Get tweet stats (+ initial visible replies)
+  // 2. Post with image (uncomment and provide image path to test)
+  // try {
+  //   const tweetWithMedia = await bot.postTweet("Check this out! 🖼️", {
+  //     media: ["./test-image.jpg"]
+  //   });
+  //   console.log("✅ Tweet with media posted:", tweetWithMedia);
+  // } catch (err) {
+  //   console.error("❌ Media tweet failed:", err.message);
+  // }
+
+  // 3. Get tweet stats (+ initial visible replies)
   const stats = await bot.getTweetStats("TWEET_ID_HERE");
   console.log("\n📊 Stats:", { likes: stats.likes, replies: stats.replies, reposts: stats.reposts, views: stats.views });
   console.log(`📋 Initial replies (${stats.initialReplies.length}):`); 
@@ -35,21 +45,21 @@ bot.on("ready", async () => {
     console.log(`  [${r.tweetId}] @${r.handle}: ${r.text.slice(0, 80)}`);
   }
 
-  // 3. Get comments with count limit (auto-scroll)
+  // 4. Get comments with count limit (auto-scroll)
   const comments = await bot.getTweetComments("TWEET_ID_HERE", 10);
   console.log(`\n💬 Comments: ${comments.collected}/${comments.requested}${comments.scrollBlocked ? " (scroll blocked)" : ""}`);
   for (const c of comments.comments) {
     console.log(`  [${c.tweetId}] @${c.handle}: ${c.text.slice(0, 80)}`);
   }
 
-  // 4. Sub-replies (replies to a reply — same method, pass the comment's tweetId)
+  // 5. Sub-replies (replies to a reply — same method, pass the comment's tweetId)
   const subReplies = await bot.getTweetComments("REPLY_TWEET_ID_HERE", 5);
   console.log(`\n🔁 Sub-replies: ${subReplies.collected}`);
   for (const c of subReplies.comments) {
     console.log(`  [${c.tweetId}] @${c.handle}: ${c.text.slice(0, 80)}`);
   }
 
-  // 5. Search & like
+  // 6. Search & like
   const liked = await bot.searchAndLike("nodejs", 3);
   console.log(`\n❤️  Liked ${liked.liked} tweets for "${liked.query}"`);
 

@@ -44,18 +44,23 @@ bot.on("ready", async () => {
     console.error(err.message); // e.g. "Whoops! You already said that."
   }
 
-  // 2. Tweet stats + initial visible replies (no scroll)
+  // 2. Post with image
+  await bot.postTweet("Check this out! 🖼️", {
+    media: ["./photo.jpg"]
+  });
+
+  // 3. Tweet stats + initial visible replies (no scroll)
   const stats = await bot.getTweetStats("TWEET_ID");
   console.log(stats.likes, stats.views, stats.initialReplies);
 
-  // 3. Comments with auto-scroll (up to 20)
+  // 4. Comments with auto-scroll (up to 20)
   const comments = await bot.getTweetComments("TWEET_ID", 20);
   console.log(comments.collected, comments.scrollBlocked);
 
-  // 4. Sub-replies — pass a comment's tweetId (works recursively)
+  // 5. Sub-replies — pass a comment's tweetId (works recursively)
   const sub = await bot.getTweetComments(comments.comments[0].tweetId, 5);
 
-  // 5. Search & like
+  // 6. Search & like
   await bot.searchAndLike("nodejs", 3);
 
   await bot.close();
@@ -172,12 +177,29 @@ bot.init(); // triggers 'ready' or 'loginRequired'
 
 ---
 
-### `bot.postTweet(text)`
+### `bot.postTweet(text, options?)`
 
-Posts a tweet (max 280 chars). After clicking post, verifies the tweet appears in your feed and extracts the tweet ID. Handles "Leave site?" dialogs automatically. Emits `tweetPosted` on success, `tweetFailed` on failure.
+Posts a tweet (max 280 chars) with optional media attachments. After clicking post, verifies the tweet appears in your feed and extracts the tweet ID. Handles "Leave site?" dialogs automatically. Emits `tweetPosted` on success, `tweetFailed` on failure.
+
+**Parameters:**
+- `text` (string) — Tweet text (max 280 chars)
+- `options.media` (string[]) — Array of file paths (max 4 images)
 
 ```js
+// Text only
 const result = await bot.postTweet("Hello! 🚀");
+
+// With single image
+await bot.postTweet("Check this out! 🖼️", {
+  media: ["./photo.jpg"]
+});
+
+// With multiple images (max 4)
+await bot.postTweet("Gallery time! 📸", {
+  media: ["./img1.jpg", "./img2.png", "./img3.jpg", "./img4.jpg"]
+});
+
+// Response:
 // {
 //   success: true,
 //   text: "Hello! 🚀",
@@ -191,6 +213,8 @@ Errors are thrown and also emitted via `tweetFailed`:
 - `"Tweet not found in feed after posting"` — verification failed
 - `"Tweet textarea not found"` — compose page failed to load
 - `"Post button not found"` — UI issue
+- `"Maximum 4 media files allowed"` — too many images
+- `"Media upload failed: ..."` — image upload error
 
 ---
 
