@@ -56,10 +56,26 @@ bot.on("ready", async () => {
   const subReplies = await bot.getTweetComments("REPLY_TWEET_ID_HERE", 5);
   console.log(`\n🔁 Sub-replies: ${subReplies.collected}`);
   for (const c of subReplies.comments) {
-    console.log(`  [${c.tweetId}] @${c.handle}: ${c.text.slice(0, 80)}`);
+     console.log(`  [${c.tweetId}] @${c.handle}: ${c.text.slice(0, 80)}`);
   }
 
-  // 6. Search & like
+  // 6. Follow a user
+  try {
+    const follow = await bot.followUser("elonmusk");
+    console.log(`\n👤 Follow result: @${follow.username} → ${follow.status}`);
+  } catch (err) {
+    console.error("❌ Follow failed:", err.message);
+  }
+
+  // 7. Unfollow a user
+  try {
+    const unfollow = await bot.unfollowUser("elonmusk");
+    console.log(`\n👤 Unfollow result: @${unfollow.username} → ${unfollow.status}`);
+  } catch (err) {
+    console.error("❌ Unfollow failed:", err.message);
+  }
+
+  // 8. Search & like
   const liked = await bot.searchAndLike("nodejs", 3);
   console.log(`\n❤️  Liked ${liked.liked} tweets for "${liked.query}"`);
 

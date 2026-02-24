@@ -5,6 +5,37 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const REQUIRED_COOKIES = ["auth_token", "ct0", "twid", "kdt", "att"];
 
+const PACKAGE_NAME = "x-twitter-bot";
+const PACKAGE_VERSION = require("./package.json").version;
+
+/**
+ * Non-blocking update check against npm registry.
+ * Logs a warning to console if a newer version is available.
+ */
+function _checkForUpdates() {
+  const https = require("https");
+  const req = https.get(
+    `https://registry.npmjs.org/${PACKAGE_NAME}/latest`,
+    { timeout: 5000 },
+    (res) => {
+      let data = "";
+      res.on("data", (chunk) => (data += chunk));
+      res.on("end", () => {
+        try {
+          const latest = JSON.parse(data).version;
+          if (latest && latest !== PACKAGE_VERSION) {
+            console.log(
+              `\x1b[33m[x-twitter-bot] Update available: ${PACKAGE_VERSION} → ${latest}. Run \"npm install ${PACKAGE_NAME}@latest\" to update.\x1b[0m`
+            );
+          }
+        } catch { /* ignore parse errors */ }
+      });
+    }
+  );
+  req.on("error", () => { /* silent fail — no network is fine */ });
+  req.end();
+}
+
 /**
  * Events:
  *   ready           – Bot authenticated and ready to use
@@ -13,6 +44,10 @@ const REQUIRED_COOKIES = ["auth_token", "ct0", "twid", "kdt", "att"];
  *   error           – Unrecoverable error during init or operation
  *   tweetPosted     – Tweet posted successfully   → { text, timestamp }
  *   tweetFailed     – Tweet failed                → { text, error }
+ *   userFollowed    – User followed successfully   → { username, status, timestamp }
+ *   followFailed    – Follow failed                → { username, error }
+ *   userUnfollowed  – User unfollowed successfully  → { username, status, timestamp }
+ *   unfollowFailed  – Unfollow failed               → { username, error }
  *   closed          – Browser closed
  */
 class TwitterBot extends EventEmitter {
@@ -52,6 +87,9 @@ class TwitterBot extends EventEmitter {
 
   async init() {
     if (this.isReady) return this;
+
+    // Non-blocking update check
+    _checkForUpdates();
 
     try {
       // ── Launch browser ────────────────────────────────────────────────
@@ -275,6 +313,7 @@ class TwitterBot extends EventEmitter {
 
         const cells = document.querySelectorAll('[data-testid="cellInnerDiv"]');
         const searchText = normalizeText(tweetText).slice(0, 20); // Use first 20 chars without emojis
+        const foundTweets = [];
         
         // Check first 10 cells (to handle promoted tweets, etc)
         for (let i = 0; i < Math.min(cells.length, 10); i++) {
@@ -285,6 +324,8 @@ class TwitterBot extends EventEmitter {
           if (!textEl) continue;
           
           const cellText = textEl.innerText;
+          foundTweets.push(cellText.slice(0, 50)); // Debug
+          
           const normalizedCell = normalizeText(cellText);
           
           if (normalizedCell.includes(searchText)) {
@@ -293,13 +334,15 @@ class TwitterBot extends EventEmitter {
             const href = statusLink ? statusLink.getAttribute("href") : "";
             const match = href.match(/\/status\/(\d+)/);
             const postId = match ? match[1] : null;
-            return { found: true, postId };
+            return { found: true, postId, foundTweets };
           }
         }
-        return { found: false, postId: null };
+        return { found: false, postId: null, foundTweets };
       }, text);
 
       if (!verification.found) {
+        console.log("[DEBUG] Searched for:", text.slice(0, 30));
+        console.log("[DEBUG] Found tweets:", verification.foundTweets);
         this.page.off("dialog", dialogHandler);
         throw new Error("Tweet not found in feed after posting");
       }
@@ -648,6 +691,303 @@ class TwitterBot extends EventEmitter {
       scrollBlocked,
       comments,
     };
+  }
+
+  // ── Follow a user ──────────────────────────────────────────────────────────
+
+  /**
+   * Follow a user on X (Twitter).
+   * @param {string} username – The username to follow (without @)
+   * @returns {Promise<{username: string, status: 'followed'|'already_following'|'failed', timestamp: string}>}
+   */
+  async followUser(username) {
+    this._ensureReady();
+    if (!username) throw new Error("Username is required");
+
+    // Strip @ if provided
+    username = username.replace(/^@/, "");
+
+    try {
+      await this.page.goto(`https://x.com/${username}`, {
+        waitUntil: "networkidle2",
+        timeout: this.timeout,
+      });
+      await delay(2000);
+
+      // Check if the profile page loaded correctly (not a 404 / suspended)
+      const profileExists = await this.page.evaluate(() => {
+        const errorHeading = document.querySelector('[data-testid="empty_state_header_text"]');
+        if (errorHeading) return false;
+        if (document.querySelector('[data-testid="UserName"]')) return true;
+        if (document.querySelector('[data-testid="UserAvatar-Container-unknown"]')) return false;
+        return true;
+      });
+
+      if (!profileExists) {
+        throw new Error(`User @${username} not found or account is suspended`);
+      }
+
+      // Detect follow state.
+      // On subscription accounts, the "Subscribe" button also has data-testid$="-unfollow"
+      // but with a colored background. The real unfollow button has transparent bg (rgba(0,0,0,0))
+      // or is a separate button whose aria-label contains "@".
+      const followState = await this.page.evaluate(() => {
+        // Check for transparent-bg unfollow button (normal accounts)
+        const unfollowBtn = document.querySelector('[data-testid$="-unfollow"]');
+        if (unfollowBtn) {
+          const bg = unfollowBtn.style.backgroundColor;
+          if (bg === "rgba(0, 0, 0, 0)" || bg === "transparent") return "already_following";
+        }
+
+        // Check for aria-label unfollow button with @ (subscription accounts)
+        const allButtons = document.querySelectorAll('button[role="button"]');
+        for (const btn of allButtons) {
+          const label = btn.getAttribute("aria-label") || "";
+          if (label.includes("@") && btn.getAttribute("aria-haspopup") === "menu") {
+            return "already_following";
+          }
+        }
+
+        const followBtn = document.querySelector('[data-testid$="-follow"]');
+        if (followBtn) return "not_following";
+
+        return "unknown";
+      });
+
+      if (followState === "already_following") {
+        return {
+          username,
+          status: "already_following",
+          timestamp: new Date().toISOString(),
+        };
+      }
+
+      if (followState === "unknown") {
+        throw new Error(`Could not detect follow button for @${username}`);
+      }
+
+      // Click the follow button
+      await this.page.evaluate(() => {
+        const btn = document.querySelector('[data-testid$="-follow"]');
+        if (btn) btn.click();
+      });
+
+      await delay(2000);
+
+      // Verify follow succeeded
+      const confirmed = await this.page.evaluate(() => {
+        // Check transparent-bg unfollow button
+        const unfollowBtn = document.querySelector('[data-testid$="-unfollow"]');
+        if (unfollowBtn) {
+          const bg = unfollowBtn.style.backgroundColor;
+          if (bg === "rgba(0, 0, 0, 0)" || bg === "transparent") return true;
+        }
+        // Check aria-label unfollow button with @
+        const allButtons = document.querySelectorAll('button[role="button"]');
+        for (const btn of allButtons) {
+          const label = btn.getAttribute("aria-label") || "";
+          if (label.includes("@") && btn.getAttribute("aria-haspopup") === "menu") return true;
+        }
+        return false;
+      });
+
+      if (!confirmed) {
+        throw new Error(`Follow action for @${username} did not complete`);
+      }
+
+      const result = {
+        username,
+        status: "followed",
+        timestamp: new Date().toISOString(),
+      };
+      this.emit("userFollowed", result);
+      return result;
+    } catch (err) {
+      this.emit("followFailed", { username, error: err.message });
+      throw err;
+    }
+  }
+
+  // ── Unfollow a user ────────────────────────────────────────────────────────
+
+  /**
+   * Unfollow a user on X (Twitter).
+   * @param {string} username – The username to unfollow (without @)
+   * @returns {Promise<{username: string, status: 'unfollowed'|'not_following'|'failed', timestamp: string}>}
+   */
+  async unfollowUser(username) {
+    this._ensureReady();
+    if (!username) throw new Error("Username is required");
+
+    // Strip @ if provided
+    username = username.replace(/^@/, "");
+
+    try {
+      await this.page.goto(`https://x.com/${username}`, {
+        waitUntil: "networkidle2",
+        timeout: this.timeout,
+      });
+      await delay(2000);
+
+      // Check if the profile page loaded correctly
+      const profileExists = await this.page.evaluate(() => {
+        const errorHeading = document.querySelector('[data-testid="empty_state_header_text"]');
+        if (errorHeading) return false;
+        if (document.querySelector('[data-testid="UserName"]')) return true;
+        if (document.querySelector('[data-testid="UserAvatar-Container-unknown"]')) return false;
+        return true;
+      });
+
+      if (!profileExists) {
+        throw new Error(`User @${username} not found or account is suspended`);
+      }
+
+      // Detect follow state.
+      // Subscription accounts have two buttons with data-testid$="-unfollow":
+      //   1) Subscribe button → colored background (e.g. purple)
+      //   2) Real unfollow button → transparent background rgba(0,0,0,0)
+      //      OR a separate button with aria-label containing "@" and aria-haspopup="menu"
+      const followState = await this.page.evaluate(() => {
+        // Check transparent-bg unfollow button (normal accounts)
+        const unfollowBtn = document.querySelector('[data-testid$="-unfollow"]');
+        if (unfollowBtn) {
+          const bg = unfollowBtn.style.backgroundColor;
+          if (bg === "rgba(0, 0, 0, 0)" || bg === "transparent") return "following";
+        }
+
+        // Check aria-label button with @ (subscription accounts)
+        const allButtons = document.querySelectorAll('button[role="button"]');
+        for (const btn of allButtons) {
+          const label = btn.getAttribute("aria-label") || "";
+          if (label.includes("@") && btn.getAttribute("aria-haspopup") === "menu") {
+            return "following";
+          }
+        }
+
+        const followBtn = document.querySelector('[data-testid$="-follow"]');
+        if (followBtn) return "not_following";
+
+        return "unknown";
+      });
+
+      if (followState === "not_following") {
+        return {
+          username,
+          status: "not_following",
+          timestamp: new Date().toISOString(),
+        };
+      }
+
+      if (followState === "unknown") {
+        throw new Error(`Could not detect follow/unfollow button for @${username}`);
+      }
+
+      // Click the correct unfollow button:
+      //   Priority 1: data-testid$="-unfollow" with transparent bg → normal account
+      //   Priority 2: button with aria-label containing "@" + aria-haspopup="menu" → subscription account
+      const clickedType = await this.page.evaluate(() => {
+        // Priority 1: transparent-bg unfollow button
+        const unfollowBtn = document.querySelector('[data-testid$="-unfollow"]');
+        if (unfollowBtn) {
+          const bg = unfollowBtn.style.backgroundColor;
+          if (bg === "rgba(0, 0, 0, 0)" || bg === "transparent") {
+            unfollowBtn.click();
+            return "normal";
+          }
+        }
+
+        // Priority 2: aria-label button with @ (subscription accounts)
+        const allButtons = document.querySelectorAll('button[role="button"]');
+        for (const btn of allButtons) {
+          const label = btn.getAttribute("aria-label") || "";
+          if (label.includes("@") && btn.getAttribute("aria-haspopup") === "menu") {
+            btn.click();
+            return "subscription";
+          }
+        }
+
+        return null;
+      });
+
+      if (!clickedType) {
+        throw new Error(`Could not find unfollow button for @${username}`);
+      }
+
+      await delay(1500);
+
+      // Two possible flows after clicking:
+      //   A) Normal accounts → confirmation dialog with data-testid="confirmationSheetConfirm"
+      //   B) Subscription accounts → dropdown menu (role="menu") → click menuitem with @username
+
+      // Try Flow A: confirmation dialog
+      let unfollowConfirmed = await this.page.evaluate(() => {
+        const confirmBtn = document.querySelector('[data-testid="confirmationSheetConfirm"]');
+        if (confirmBtn) {
+          confirmBtn.click();
+          return true;
+        }
+        return false;
+      });
+
+      if (!unfollowConfirmed) {
+        // Try Flow B: dropdown menu — click the menuitem whose text contains @username
+        unfollowConfirmed = await this.page.evaluate((uname) => {
+          const menu = document.querySelector('[role="menu"]');
+          if (!menu) return false;
+
+          const items = menu.querySelectorAll('[role="menuitem"]');
+          for (const item of items) {
+            const text = item.innerText.toLowerCase();
+            if (text.includes("@" + uname.toLowerCase())) {
+              item.click();
+              return true;
+            }
+          }
+
+          // Fallback: click the first menuitem if only one exists
+          if (items.length === 1) {
+            items[0].click();
+            return true;
+          }
+
+          return false;
+        }, username);
+
+        if (!unfollowConfirmed) {
+          throw new Error(`Unfollow confirmation not found for @${username}`);
+        }
+
+        await delay(1000);
+
+        // After dropdown click, there may still be a confirmation dialog
+        await this.page.evaluate(() => {
+          const confirmBtn = document.querySelector('[data-testid="confirmationSheetConfirm"]');
+          if (confirmBtn) confirmBtn.click();
+        });
+      }
+
+      await delay(2000);
+
+      // Verify unfollow succeeded – follow button should appear
+      const verified = await this.page.evaluate(() => {
+        return !!document.querySelector('[data-testid$="-follow"]');
+      });
+
+      if (!verified) {
+        throw new Error(`Unfollow action for @${username} did not complete`);
+      }
+
+      const result = {
+        username,
+        status: "unfollowed",
+        timestamp: new Date().toISOString(),
+      };
+      this.emit("userUnfollowed", result);
+      return result;
+    } catch (err) {
+      this.emit("unfollowFailed", { username, error: err.message });
+      throw err;
+    }
   }
 
   // ── Search & like tweets ─────────────────────────────────────────────────

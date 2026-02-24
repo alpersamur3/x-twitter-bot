@@ -60,7 +60,13 @@ bot.on("ready", async () => {
   // 5. Sub-replies — pass a comment's tweetId (works recursively)
   const sub = await bot.getTweetComments(comments.comments[0].tweetId, 5);
 
-  // 6. Search & like
+  // 6. Follow a user
+  await bot.followUser("elonmusk");
+
+  // 7. Unfollow a user
+  await bot.unfollowUser("elonmusk");
+
+  // 8. Search & like
   await bot.searchAndLike("nodejs", 3);
 
   await bot.close();
@@ -143,6 +149,10 @@ Get these from DevTools → Application → Cookies → `https://x.com`.
 | `loginRequired` | – | Cookies invalid/expired |
 | `tweetPosted` | `{ text, timestamp }` | Tweet posted successfully |
 | `tweetFailed` | `{ text, error }` | Tweet post failed |
+| `userFollowed` | `{ username, status, timestamp }` | User followed successfully |
+| `followFailed` | `{ username, error }` | Follow failed |
+| `userUnfollowed` | `{ username, status, timestamp }` | User unfollowed successfully |
+| `unfollowFailed` | `{ username, error }` | Unfollow failed |
 | `error` | `Error` | Unrecoverable error during init |
 | `closed` | – | Browser closed |
 
@@ -306,6 +316,77 @@ const subReplies = await bot.getTweetComments(comments.comments[0].tweetId, 5);
 ```
 
 Works recursively — you can traverse entire conversation threads.
+
+---
+
+### `bot.followUser(username)`
+
+Follows a user on X/Twitter. Automatically detects if already following and returns appropriate status.
+
+**Parameters:**
+- `username` (string) — Username to follow (with or without @)
+
+```js
+const result = await bot.followUser("elonmusk");
+// or with @
+const result = await bot.followUser("@elonmusk");
+```
+
+**Response:**
+```js
+{
+  username: "elonmusk",
+  status: "followed",           // or "already_following"
+  timestamp: "2026-02-24T12:00:00.000Z"
+}
+```
+
+**Status values:**
+- `"followed"` — User was successfully followed
+- `"already_following"` — User was already being followed (no action taken)
+
+**Errors:**
+- `"User @username not found or account is suspended"` — Profile doesn't exist
+- `"Could not detect follow button for @username"` — UI detection failed
+- `"Follow action for @username did not complete"` — Follow click failed to register
+
+Emits `userFollowed` on success, `followFailed` on error.
+
+---
+
+### `bot.unfollowUser(username)`
+
+Unfollows a user on X/Twitter. Automatically handles the confirmation dialog and detects if not following.
+
+**Parameters:**
+- `username` (string) — Username to unfollow (with or without @)
+
+```js
+const result = await bot.unfollowUser("elonmusk");
+// or with @
+const result = await bot.unfollowUser("@elonmusk");
+```
+
+**Response:**
+```js
+{
+  username: "elonmusk",
+  status: "unfollowed",         // or "not_following"
+  timestamp: "2026-02-24T12:00:00.000Z"
+}
+```
+
+**Status values:**
+- `"unfollowed"` — User was successfully unfollowed
+- `"not_following"` — User was not being followed (no action taken)
+
+**Errors:**
+- `"User @username not found or account is suspended"` — Profile doesn't exist
+- `"Could not detect follow/unfollow button for @username"` — UI detection failed
+- `"Unfollow confirmation dialog not found for @username"` — Confirmation popup failed to appear
+- `"Unfollow action for @username did not complete"` — Unfollow didn't register
+
+Emits `userUnfollowed` on success, `unfollowFailed` on error.
 
 ---
 
