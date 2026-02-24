@@ -38,7 +38,7 @@ class TwitterBot extends EventEmitter {
     this.cookies = options.cookies;
     this.username = options.username || "";
     this.headless = options.headless !== undefined ? options.headless : true;
-    this.timeout = options.timeout || 60000;
+    this.timeout = options.timeout || 600000;
     this.chromePath = options.chromePath || null;
 
     this.browser = null;
@@ -252,16 +252,42 @@ class TwitterBot extends EventEmitter {
       }
 
       // URL changed → we're on home/feed now. Find our tweet at the top.
-      await delay(2000);
+      await delay(3000);
 
       const verification = await this.page.evaluate((tweetText) => {
+        // Helper to remove emojis and normalize text
+        const normalizeText = (str) => {
+          return str
+            .replace(/[\u{1F600}-\u{1F64F}]/gu, '') // Emoticons
+            .replace(/[\u{1F300}-\u{1F5FF}]/gu, '') // Misc Symbols and Pictographs
+            .replace(/[\u{1F680}-\u{1F6FF}]/gu, '') // Transport and Map
+            .replace(/[\u{1F700}-\u{1F77F}]/gu, '') // Alchemical Symbols
+            .replace(/[\u{1F780}-\u{1F7FF}]/gu, '') // Geometric Shapes Extended
+            .replace(/[\u{1F800}-\u{1F8FF}]/gu, '') // Supplemental Arrows-C
+            .replace(/[\u{1F900}-\u{1F9FF}]/gu, '') // Supplemental Symbols and Pictographs
+            .replace(/[\u{1FA00}-\u{1FA6F}]/gu, '') // Chess Symbols
+            .replace(/[\u{1FA70}-\u{1FAFF}]/gu, '') // Symbols and Pictographs Extended-A
+            .replace(/[\u{2600}-\u{26FF}]/gu, '')   // Misc symbols
+            .replace(/[\u{2700}-\u{27BF}]/gu, '')   // Dingbats
+            .trim()
+            .replace(/\s+/g, ' ');
+        };
+
         const cells = document.querySelectorAll('[data-testid="cellInnerDiv"]');
-        for (const cell of cells) {
+        const searchText = normalizeText(tweetText).slice(0, 20); // Use first 20 chars without emojis
+        
+        // Check first 10 cells (to handle promoted tweets, etc)
+        for (let i = 0; i < Math.min(cells.length, 10); i++) {
+          const cell = cells[i];
           const article = cell.querySelector('article[data-testid="tweet"]');
           if (!article) continue;
           const textEl = article.querySelector('[data-testid="tweetText"]');
           if (!textEl) continue;
-          if (textEl.innerText.includes(tweetText.slice(0, 30))) {
+          
+          const cellText = textEl.innerText;
+          const normalizedCell = normalizeText(cellText);
+          
+          if (normalizedCell.includes(searchText)) {
             const timeLink = article.querySelector('a[href*="/status/"] time');
             const statusLink = timeLink ? timeLink.closest("a") : null;
             const href = statusLink ? statusLink.getAttribute("href") : "";
